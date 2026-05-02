@@ -1,0 +1,15 @@
+.venv/
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.DS_Store
+
+# Derived pipeline outputs (regenerated on every ``python main.py run-all``).
+data/_judged/
+data/_leaderboard/
+data/dialog_specs.json
+
+# Optional local artifacts from judge fine-tuning workflow.
+judge_train*.jsonl

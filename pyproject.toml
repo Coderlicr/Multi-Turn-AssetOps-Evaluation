@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evaluation-system"
+version = "0.1.0"
+description = "Multi-turn dialog evaluation framework with pluggable adapters"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.5",
+    "openai>=1.40",
+    "matplotlib>=3.7",
+]
+
+[project.scripts]
+evaluation-cli = "evaluation_system.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["evaluation_system*"]
