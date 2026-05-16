@@ -13,6 +13,7 @@ Metrics (final names; do not rename):
 
 from __future__ import annotations
 
+from evaluation_system.evaluators.automatic.schema_compliance import default_schema_validator
 from evaluation_system.models.dialog import AutomaticEvaluation, DialogRecord, ToolCallRecord
 from evaluation_system.models.enums import TurnStatus
 
@@ -43,6 +44,24 @@ def _all_tool_calls(dialog: DialogRecord) -> list[ToolCallRecord]:
     return dialog.all_tool_calls()
 
 
+def _schema_tool_name(call: ToolCallRecord) -> str:
+    server = getattr(call, "tool_server", None)
+    if isinstance(server, str) and server.strip() and "." not in call.tool_name:
+        return f"{server.strip()}.{call.tool_name}"
+    return call.tool_name
+
+
+def _apply_schema_compliance(calls: list[ToolCallRecord]) -> None:
+    validator = default_schema_validator()
+    for call in calls:
+        result = validator.validate(_schema_tool_name(call), call.input_arguments)
+        call.tool_exists = result.tool_exists
+        call.schema_valid = result.schema_valid
+        # Keep a short reason for debugging/export without changing metric shape.
+        if result.reason:
+            setattr(call, "schema_error", result.reason)
+
+
 def run_automatic_evaluation(
     dialog: DialogRecord,
 ) -> DialogRecord:
@@ -50,6 +69,7 @@ def run_automatic_evaluation(
     Populate ``automatic_evaluation`` on the dialog record.
     """
     calls = _all_tool_calls(dialog)
+    _apply_schema_compliance(calls)
     total = len(calls)
 
     legal = sum(1 for c in calls if c.tool_exists is True)

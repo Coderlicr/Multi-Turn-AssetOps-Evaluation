@@ -1,0 +1,1925 @@
+generated_from:
+  source: FastMCP runtime list_tools()
+  default_server_paths:
+    iot: iot-mcp-server
+    utilities: utilities-mcp-server
+    fmsr: fmsr-mcp-server
+    tsfm: tsfm-mcp-server
+    wo: wo-mcp-server
+  excluded_servers:
+    vibration: Not registered in DEFAULT_SERVER_PATHS; repository comments say it is excluded because
+      no chiller vibration sensors exist for production scenarios.
+call_contract:
+  tool_call_shape:
+    server: One of servers keys below.
+    tool: One tool name under that server.
+    arguments: JSON object whose keys and values comply with canonical_input_schema.
+  argument_policy:
+    allow_extra_arguments: false
+    omit_optional_arguments_when_unknown: true
+    null_only_when_schema_allows_null: true
+    empty_string_counts_as_missing_for_required_string: true
+    preserve_argument_names_exactly: true
+schema_compliance_scoring:
+  per_call_score_range:
+  - 0.0
+  - 1.0
+  recommended_weights:
+    valid_server_and_tool: 0.2
+    arguments_is_object: 0.1
+    required_arguments_present: 0.2
+    no_unknown_arguments: 0.15
+    json_schema_type_compatible: 0.25
+    semantic_constraints: 0.1
+  hard_fail_conditions:
+  - server is unknown
+  - tool is unknown under the selected server
+  - arguments is not a JSON object
+  semantic_constraints_note: Semantic constraints are evaluation hints layered on top of MCP JSON Schema.
+    They should be scored when enough context is available from prior tool outputs or scenario data.
+global_semantic_rules:
+  site_name:
+    allowed_values:
+    - MAIN
+    match: exact
+  asset_id:
+    examples:
+    - Chiller 3
+    - Chiller 4
+    - Chiller 6
+    - Chiller 9
+    rule: Use the asset name exactly as returned by iot.assets / prior tool results.
+  equipment_id:
+    examples:
+    - Chiller 6
+    - CWC04013
+    rule: Prefer the exact asset or equipment identifier from prior tool results.
+  start:
+    format: iso8601_datetime
+    example: '2020-06-01T00:00:00'
+  final:
+    format: iso8601_datetime_or_null
+    example: '2020-06-20T00:00:00'
+    ordering_rule: If provided, final must be later than start.
+  start_date:
+    format: yyyy-mm-dd_or_null
+    example: '2020-06-20'
+  end_date:
+    format: yyyy-mm-dd_or_null
+    example: '2020-06-20'
+    ordering_rule: If provided with start_date, end_date must be on or after start_date.
+  dataset_path:
+    format: absolute_file_path
+    expected_source: Usually iot.history_csv.csv_path.
+  csv_path:
+    format: absolute_csv_path
+    expected_source: Usually iot.history_csv.csv_path, tsfm.run_tsad.results_file, or tsfm.run_integrated_tsad.results_file.
+  file_name:
+    format: absolute_json_path
+    rule: Must be a JSON file; use utilities.csv_stats for CSV files.
+  target_columns:
+    rule: Non-empty array of sensor column names. Use full names returned by iot.sensors / history_csv
+      columns; all should belong to the same asset.
+  failure_modes:
+    rule: Non-empty array; preferably values returned by fmsr.get_failure_modes; keep length <= 5.
+  sensors:
+    rule: Non-empty array; preferably values returned by iot.sensors; keep length <= 10.
+  timestamp_column:
+    examples:
+    - timestamp
+  model_checkpoint:
+    allowed_values:
+    - ttm_96_28
+    - ttm_512_96
+    - null
+    rule: May also be an absolute checkpoint path if explicitly available.
+  frequency_sampling:
+    allowed_values:
+    - ''
+    - oov
+    - hourly
+    - 15_minutes
+    - 10_minutes
+    - 5_minutes
+    - half_hourly
+    - minutely
+    rule: Do not use pandas/ISO aliases like '1H' or '15T'.
+  false_alarm:
+    type: number
+    minimum: 0.0
+    maximum: 1.0
+  n_calibration:
+    type: number
+    minimum: 0.0
+    maximum: 1.0
+    rule: Use a fraction, not an absolute count.
+  n_finetune:
+    type: number
+    minimum: 0.0
+    maximum: 1.0
+  n_test:
+    type: number
+    minimum: 0.0
+    maximum: 1.0
+  ad_model_type:
+    allowed_values:
+    - timeseries_conformal
+    - timeseries_conformal_adaptive
+  task:
+    allowed_values:
+    - fit
+    - inference
+servers:
+  iot:
+    entrypoint: iot-mcp-server
+    tools:
+      sites:
+        description: Retrieves a list of sites. Each site is represented by a name.
+        canonical_input_schema:
+          properties: {}
+          title: sitesArguments
+          type: object
+        parameters: {}
+      assets:
+        description: Returns a list of assets for a given site. Each asset includes an id and a name.
+        canonical_input_schema:
+          properties:
+            site_name:
+              description: Site name. The only available site is 'MAIN'.
+              title: Site Name
+              type: string
+          required:
+          - site_name
+          title: assetsArguments
+          type: object
+        parameters:
+          site_name:
+            required: true
+            type: string
+            description: Site name. The only available site is 'MAIN'.
+            semantic:
+              allowed_values:
+              - MAIN
+              match: exact
+      sensors:
+        description: Lists the sensors available for a specified asset at a given site.
+        canonical_input_schema:
+          properties:
+            site_name:
+              description: Site name. The only available site is 'MAIN'.
+              title: Site Name
+              type: string
+            asset_id:
+              description: Asset name, e.g. 'Chiller 3', 'Chiller 4', 'Chiller 6', or 'Chiller 9'.
+              title: Asset Id
+              type: string
+          required:
+          - site_name
+          - asset_id
+          title: sensorsArguments
+          type: object
+        parameters:
+          site_name:
+            required: true
+            type: string
+            description: Site name. The only available site is 'MAIN'.
+            semantic:
+              allowed_values:
+              - MAIN
+              match: exact
+          asset_id:
+            required: true
+            type: string
+            description: Asset name, e.g. 'Chiller 3', 'Chiller 4', 'Chiller 6', or 'Chiller 9'.
+            semantic:
+              examples:
+              - Chiller 3
+              - Chiller 4
+              - Chiller 6
+              - Chiller 9
+              rule: Use the asset name exactly as returned by iot.assets / prior tool results.
+      history:
+        description: Returns a list of historical sensor values for the specified asset(s) at a site within
+          a given time range (start to final).
+        canonical_input_schema:
+          properties:
+            site_name:
+              description: Site name. The only available site is 'MAIN'.
+              title: Site Name
+              type: string
+            asset_id:
+              description: Asset name, e.g. 'Chiller 3', 'Chiller 4', 'Chiller 6', or 'Chiller 9'.
+              title: Asset Id
+              type: string
+            start:
+              description: ISO 8601 datetime string, e.g. '2020-06-01T00:00:00'.
+              title: Start
+              type: string
+            final:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: ISO 8601 datetime string, e.g. '2020-06-20T00:00:00'. Omit to query up to the
+                latest data.
+              title: Final
+          required:
+          - site_name
+          - asset_id
+          - start
+          title: historyArguments
+          type: object
+        parameters:
+          site_name:
+            required: true
+            type: string
+            description: Site name. The only available site is 'MAIN'.
+            semantic:
+              allowed_values:
+              - MAIN
+              match: exact
+          asset_id:
+            required: true
+            type: string
+            description: Asset name, e.g. 'Chiller 3', 'Chiller 4', 'Chiller 6', or 'Chiller 9'.
+            semantic:
+              examples:
+              - Chiller 3
+              - Chiller 4
+              - Chiller 6
+              - Chiller 9
+              rule: Use the asset name exactly as returned by iot.assets / prior tool results.
+          start:
+            required: true
+            type: string
+            description: ISO 8601 datetime string, e.g. '2020-06-01T00:00:00'.
+            semantic:
+              format: iso8601_datetime
+              example: '2020-06-01T00:00:00'
+          final:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: ISO 8601 datetime string, e.g. '2020-06-20T00:00:00'. Omit to query up to the
+              latest data.
+            semantic:
+              format: iso8601_datetime_or_null
+              example: '2020-06-20T00:00:00'
+              ordering_rule: If provided, final must be later than start.
+      history_csv:
+        description: 'Returns historical sensor data for an asset as a CSV file path.
+
+
+          Identical to `history` but writes the observations to a temporary CSV file
+
+          and returns the file path instead of raw JSON.  Use this tool when the next
+
+          step requires a CSV dataset (e.g. TSFM anomaly detection or forecasting).
+
+
+          The CSV has columns: timestamp, asset_id, <sensor1>, <sensor2>, ...
+
+          '
+        canonical_input_schema:
+          properties:
+            site_name:
+              description: Site name. The only available site is 'MAIN'.
+              title: Site Name
+              type: string
+            asset_id:
+              description: Asset name, e.g. 'Chiller 3', 'Chiller 4', 'Chiller 6', or 'Chiller 9'.
+              title: Asset Id
+              type: string
+            start:
+              description: ISO 8601 datetime string, e.g. '2020-06-01T00:00:00'.
+              title: Start
+              type: string
+            final:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: ISO 8601 datetime string, e.g. '2020-06-20T00:00:00'. Omit to query up to the
+                latest data.
+              title: Final
+          required:
+          - site_name
+          - asset_id
+          - start
+          title: history_csvArguments
+          type: object
+        parameters:
+          site_name:
+            required: true
+            type: string
+            description: Site name. The only available site is 'MAIN'.
+            semantic:
+              allowed_values:
+              - MAIN
+              match: exact
+          asset_id:
+            required: true
+            type: string
+            description: Asset name, e.g. 'Chiller 3', 'Chiller 4', 'Chiller 6', or 'Chiller 9'.
+            semantic:
+              examples:
+              - Chiller 3
+              - Chiller 4
+              - Chiller 6
+              - Chiller 9
+              rule: Use the asset name exactly as returned by iot.assets / prior tool results.
+          start:
+            required: true
+            type: string
+            description: ISO 8601 datetime string, e.g. '2020-06-01T00:00:00'.
+            semantic:
+              format: iso8601_datetime
+              example: '2020-06-01T00:00:00'
+          final:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: ISO 8601 datetime string, e.g. '2020-06-20T00:00:00'. Omit to query up to the
+              latest data.
+            semantic:
+              format: iso8601_datetime_or_null
+              example: '2020-06-20T00:00:00'
+              ordering_rule: If provided, final must be later than start.
+  utilities:
+    entrypoint: utilities-mcp-server
+    tools:
+      json_reader:
+        description: Reads a JSON file and returns its parsed content. For CSV files use csv_stats.
+        canonical_input_schema:
+          properties:
+            file_name:
+              description: Absolute path to a .json file. This tool only reads JSON files — do NOT pass
+                a .csv path here. For CSV files (e.g. from history_csv or run_tsad), use csv_stats instead.
+              title: File Name
+              type: string
+          required:
+          - file_name
+          title: json_readerArguments
+          type: object
+        parameters:
+          file_name:
+            required: true
+            type: string
+            description: Absolute path to a .json file. This tool only reads JSON files — do NOT pass
+              a .csv path here. For CSV files (e.g. from history_csv or run_tsad), use csv_stats instead.
+            semantic:
+              format: absolute_json_path
+              rule: Must be a JSON file; use utilities.csv_stats for CSV files.
+      current_date_time:
+        description: Provides the current date time as a JSON object.
+        canonical_input_schema:
+          properties: {}
+          title: current_date_timeArguments
+          type: object
+        parameters: {}
+      current_time_english:
+        description: Returns the current time in English text.
+        canonical_input_schema:
+          properties: {}
+          title: current_time_englishArguments
+          type: object
+        parameters: {}
+      csv_stats:
+        description: 'Compute descriptive statistics (mean, std, min, max, trend slope) for columns in
+          a CSV file.
+
+
+          Use this tool to read results from history_csv, run_tsad, or run_integrated_tsad — not json_reader.
+
+          '
+        canonical_input_schema:
+          properties:
+            csv_path:
+              description: Absolute path to a .csv file, e.g. the csv_path returned by history_csv or
+                run_tsad/run_integrated_tsad. Use this tool — not json_reader — whenever the prior step
+                returned a CSV file path.
+              title: Csv Path
+              type: string
+            columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: List of column names to analyse. If omitted, all numeric columns are included.
+              title: Columns
+          required:
+          - csv_path
+          title: csv_statsArguments
+          type: object
+        parameters:
+          csv_path:
+            required: true
+            type: string
+            description: Absolute path to a .csv file, e.g. the csv_path returned by history_csv or run_tsad/run_integrated_tsad.
+              Use this tool — not json_reader — whenever the prior step returned a CSV file path.
+            semantic:
+              format: absolute_csv_path
+              expected_source: Usually iot.history_csv.csv_path, tsfm.run_tsad.results_file, or tsfm.run_integrated_tsad.results_file.
+          columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: List of column names to analyse. If omitted, all numeric columns are included.
+  fmsr:
+    entrypoint: fmsr-mcp-server
+    tools:
+      get_failure_modes:
+        description: 'Returns a list of known failure modes for the given asset.
+
+          For chillers and AHUs returns a curated list. For other assets queries the LLM.'
+        canonical_input_schema:
+          properties:
+            asset_name:
+              description: Asset name, e.g. 'Chiller 3'. For chillers and AHUs returns a curated list;
+                for other asset types queries the LLM.
+              title: Asset Name
+              type: string
+          required:
+          - asset_name
+          title: get_failure_modesArguments
+          type: object
+        parameters:
+          asset_name:
+            required: true
+            type: string
+            description: Asset name, e.g. 'Chiller 3'. For chillers and AHUs returns a curated list; for
+              other asset types queries the LLM.
+      get_failure_mode_sensor_mapping:
+        description: 'For each (failure_mode, sensor) pair determines whether the sensor can detect
+
+          the failure. Returns a bidirectional mapping (fm→sensors, sensor→fms) plus
+
+          the full per-pair relevancy details.
+
+
+          Results are cached in sensor_mappings.yaml — cache hits are instant.
+
+          Cache misses fall back to parallel LLM calls and are written back to cache.
+
+          Keep both lists small (e.g. ≤5 failure modes, ≤10 sensors) for best results.'
+        canonical_input_schema:
+          properties:
+            asset_name:
+              description: Asset name, e.g. 'Chiller 3'. For chillers and AHUs returns a curated list;
+                for other asset types queries the LLM.
+              title: Asset Name
+              type: string
+            failure_modes:
+              description: List of failure mode names from get_failure_modes. Keep ≤5 to avoid long runtimes.
+              items:
+                type: string
+              title: Failure Modes
+              type: array
+            sensors:
+              description: List of sensor column names from the sensors() tool. Keep ≤10 to avoid long
+                runtimes.
+              items:
+                type: string
+              title: Sensors
+              type: array
+          required:
+          - asset_name
+          - failure_modes
+          - sensors
+          title: get_failure_mode_sensor_mappingArguments
+          type: object
+        parameters:
+          asset_name:
+            required: true
+            type: string
+            description: Asset name, e.g. 'Chiller 3'. For chillers and AHUs returns a curated list; for
+              other asset types queries the LLM.
+          failure_modes:
+            required: true
+            type: array
+            description: List of failure mode names from get_failure_modes. Keep ≤5 to avoid long runtimes.
+            items:
+              type: string
+            semantic:
+              rule: Non-empty array; preferably values returned by fmsr.get_failure_modes; keep length
+                <= 5.
+          sensors:
+            required: true
+            type: array
+            description: List of sensor column names from the sensors() tool. Keep ≤10 to avoid long runtimes.
+            items:
+              type: string
+            semantic:
+              rule: Non-empty array; preferably values returned by iot.sensors; keep length <= 10.
+        tool_semantic_rules:
+          failure_modes:
+            expected_source: fmsr.get_failure_modes.failure_modes
+            max_items_recommended: 5
+          sensors:
+            expected_source: iot.sensors.sensors
+            max_items_recommended: 10
+  tsfm:
+    entrypoint: tsfm-mcp-server
+    tools:
+      get_ai_tasks:
+        description: 'Returns the list of supported AI task types for time-series analysis.
+
+
+          Tasks: tsfm_integrated_tsad, tsfm_forecasting, tsfm_forecasting_finetune,
+
+          tsfm_forecasting_evaluation.
+
+          '
+        canonical_input_schema:
+          properties: {}
+          title: get_ai_tasksArguments
+          type: object
+        parameters: {}
+      get_tsfm_models:
+        description: 'Returns the list of available pre-trained TinyTimeMixer (TTM) model checkpoints.
+
+
+          Models: ttm_96_28 (context_length=96), ttm_512_96 (context_length=512),
+
+          and energy-domain fine-tuned variants of both.
+
+          '
+        canonical_input_schema:
+          properties: {}
+          title: get_tsfm_modelsArguments
+          type: object
+        parameters: {}
+      run_tsfm_forecasting:
+        description: "Run zero-shot time-series forecasting with a TinyTimeMixer (TTM) model.\n\nReturns\
+          \ a ForecastingResult whose results_file is the path to a JSON file\nwith raw predictions (target_prediction,\
+          \ timestamp, target_columns arrays).\nPass that path to run_tsad as tsfm_output_json for anomaly\
+          \ detection.\n\nArgs:\n    dataset_path: Path to a CSV, JSON, or XLSX dataset.\n    timestamp_column:\
+          \ Name of the timestamp column.\n    target_columns: Columns to forecast.\n    model_checkpoint:\
+          \ Model name (e.g. ttm_96_28) or absolute checkpoint path.\n    forecast_horizon: Number of\
+          \ steps to forecast; -1 uses the model default.\n    conditional_columns: Exogenous / conditional\
+          \ feature columns.\n    id_columns: ID columns for multi-entity grouped time series.\n    frequency_sampling:\
+          \ Sampling frequency string (e.g. '15_minutes') or\n        'oov' to auto-detect from the data.\n\
+          \    autoregressive_modeling: Set True (default) for pure time-series prediction\n        using\
+          \ the series' own past values. Only set False if you have exogenous\n        features in conditional_columns\
+          \ — without them False will always error.\n        IMPORTANT: if you want to then run anomaly\
+          \ detection, call run_tsad with\n        a SINGLE target column at a time. For multi-column\
+          \ anomaly detection use\n        run_integrated_tsad instead (it handles per-column looping\
+          \ automatically).\n    include_dataquality_summary: Attach a data-quality report to the result.\n"
+        canonical_input_schema:
+          properties:
+            dataset_path:
+              description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+              title: Dataset Path
+              type: string
+            timestamp_column:
+              description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+              title: Timestamp Column
+              type: string
+            target_columns:
+              description: Sensor column names to analyse. Use the full names as returned by the sensors()
+                tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+              items:
+                type: string
+              title: Target Columns
+              type: array
+            model_checkpoint:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: 'Pre-trained TTM model name: ''ttm_96_28'' (context=96, default) or ''ttm_512_96''
+                (context=512). Omit to use the default.'
+              title: Model Checkpoint
+            forecast_horizon:
+              anyOf:
+              - type: integer
+              - type: 'null'
+              default: null
+              description: Number of steps to forecast; -1 or None uses the model default.
+              title: Forecast Horizon
+            conditional_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+              title: Conditional Columns
+            id_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+                data.
+              title: Id Columns
+            frequency_sampling:
+              default: oov
+              description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+                ''half_hourly'', ''minutely''. Use '''' or ''oov'' to auto-detect. Never use ISO 8601
+                like ''1H'' or ''15T''.'
+              title: Frequency Sampling
+              type: string
+            autoregressive_modeling:
+              default: true
+              description: Use autoregressive inference; default True. Leave True unless you have a specific
+                reason to disable.
+              title: Autoregressive Modeling
+              type: boolean
+            include_dataquality_summary:
+              default: false
+              description: Attach a data-quality report to the result; default False.
+              title: Include Dataquality Summary
+              type: boolean
+          required:
+          - dataset_path
+          - timestamp_column
+          - target_columns
+          title: run_tsfm_forecastingArguments
+          type: object
+        parameters:
+          dataset_path:
+            required: true
+            type: string
+            description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+            semantic:
+              format: absolute_file_path
+              expected_source: Usually iot.history_csv.csv_path.
+          timestamp_column:
+            required: true
+            type: string
+            description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+            semantic:
+              examples:
+              - timestamp
+          target_columns:
+            required: true
+            type: array
+            description: Sensor column names to analyse. Use the full names as returned by the sensors()
+              tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+            items:
+              type: string
+            semantic:
+              rule: Non-empty array of sensor column names. Use full names returned by iot.sensors / history_csv
+                columns; all should belong to the same asset.
+          model_checkpoint:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: 'Pre-trained TTM model name: ''ttm_96_28'' (context=96, default) or ''ttm_512_96''
+              (context=512). Omit to use the default.'
+            semantic:
+              allowed_values:
+              - ttm_96_28
+              - ttm_512_96
+              - null
+              rule: May also be an absolute checkpoint path if explicitly available.
+          forecast_horizon:
+            required: false
+            type:
+            - integer
+            - 'null'
+            default: null
+            description: Number of steps to forecast; -1 or None uses the model default.
+          conditional_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+          id_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+              data.
+          frequency_sampling:
+            required: false
+            type: string
+            default: oov
+            description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+              ''half_hourly'', ''minutely''. Use '''' or ''oov'' to auto-detect. Never use ISO 8601 like
+              ''1H'' or ''15T''.'
+            semantic:
+              allowed_values:
+              - ''
+              - oov
+              - hourly
+              - 15_minutes
+              - 10_minutes
+              - 5_minutes
+              - half_hourly
+              - minutely
+              rule: Do not use pandas/ISO aliases like '1H' or '15T'.
+          autoregressive_modeling:
+            required: false
+            type: boolean
+            default: true
+            description: Use autoregressive inference; default True. Leave True unless you have a specific
+              reason to disable.
+          include_dataquality_summary:
+            required: false
+            type: boolean
+            default: false
+            description: Attach a data-quality report to the result; default False.
+      run_tsfm_finetuning:
+        description: "Few-shot fine-tune a TinyTimeMixer model on a local dataset.\n\nReturns a FinetuningResult\
+          \ with the saved checkpoint path and a JSON file\ncontaining per-forecast-horizon performance\
+          \ metrics.\n\nArgs:\n    dataset_path: Path to the training dataset (CSV/JSON/XLSX).\n    timestamp_column:\
+          \ Name of the timestamp column.\n    target_columns: Columns to forecast and fine-tune on.\n\
+          \    model_checkpoint: Base model to start from (e.g. ttm_96_28).\n    save_model_dir: Directory\
+          \ to save the fine-tuned model checkpoint.\n    forecast_horizon: Steps to forecast; -1 uses\
+          \ the model default.\n    n_finetune: Fraction (≤1) or count (>1) of samples for fine-tuning.\n\
+          \    n_calibration: Fraction or count for calibration set (default 0).\n    n_test: Fraction\
+          \ or count for test evaluation (default 0.05).\n    conditional_columns: Exogenous feature columns.\n\
+          \    id_columns: ID columns for grouped time series.\n    frequency_sampling: Sampling frequency\
+          \ string or 'oov' to auto-detect.\n    autoregressive_modeling: Use autoregressive mode when\
+          \ True.\n    include_dataquality_summary: Attach a data-quality report to the result.\n"
+        canonical_input_schema:
+          properties:
+            dataset_path:
+              description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+              title: Dataset Path
+              type: string
+            timestamp_column:
+              description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+              title: Timestamp Column
+              type: string
+            target_columns:
+              description: Sensor column names to analyse. Use the full names as returned by the sensors()
+                tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+              items:
+                type: string
+              title: Target Columns
+              type: array
+            model_checkpoint:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: 'Pre-trained TTM model name: ''ttm_96_28'' (context=96, default) or ''ttm_512_96''
+                (context=512). Omit to use the default.'
+              title: Model Checkpoint
+            save_model_dir:
+              default: tuned_models
+              description: Directory name to save the fine-tuned model checkpoint (relative to outputs
+                dir).
+              title: Save Model Dir
+              type: string
+            forecast_horizon:
+              default: -1
+              description: Steps to forecast; -1 uses the model default.
+              title: Forecast Horizon
+              type: integer
+            n_finetune:
+              default: 0.05
+              description: Fraction (≤1.0) of samples for fine-tuning; default 0.05.
+              title: N Finetune
+              type: number
+            n_calibration:
+              default: 0.0
+              description: Fraction (≤1.0) for calibration set during fine-tuning; default 0.0 (skip calibration).
+              title: N Calibration
+              type: number
+            n_test:
+              default: 0.05
+              description: Fraction (≤1.0) for test evaluation; default 0.05.
+              title: N Test
+              type: number
+            conditional_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+              title: Conditional Columns
+            id_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+                data.
+              title: Id Columns
+            frequency_sampling:
+              default: oov
+              description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+                ''half_hourly'', ''minutely''. Use '''' or ''oov'' to auto-detect. Never use ISO 8601
+                like ''1H'' or ''15T''.'
+              title: Frequency Sampling
+              type: string
+            autoregressive_modeling:
+              default: true
+              description: Use autoregressive inference; default True. Leave True unless you have a specific
+                reason to disable.
+              title: Autoregressive Modeling
+              type: boolean
+            include_dataquality_summary:
+              default: false
+              description: Attach a data-quality report to the result; default False.
+              title: Include Dataquality Summary
+              type: boolean
+          required:
+          - dataset_path
+          - timestamp_column
+          - target_columns
+          title: run_tsfm_finetuningArguments
+          type: object
+        parameters:
+          dataset_path:
+            required: true
+            type: string
+            description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+            semantic:
+              format: absolute_file_path
+              expected_source: Usually iot.history_csv.csv_path.
+          timestamp_column:
+            required: true
+            type: string
+            description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+            semantic:
+              examples:
+              - timestamp
+          target_columns:
+            required: true
+            type: array
+            description: Sensor column names to analyse. Use the full names as returned by the sensors()
+              tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+            items:
+              type: string
+            semantic:
+              rule: Non-empty array of sensor column names. Use full names returned by iot.sensors / history_csv
+                columns; all should belong to the same asset.
+          model_checkpoint:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: 'Pre-trained TTM model name: ''ttm_96_28'' (context=96, default) or ''ttm_512_96''
+              (context=512). Omit to use the default.'
+            semantic:
+              allowed_values:
+              - ttm_96_28
+              - ttm_512_96
+              - null
+              rule: May also be an absolute checkpoint path if explicitly available.
+          save_model_dir:
+            required: false
+            type: string
+            default: tuned_models
+            description: Directory name to save the fine-tuned model checkpoint (relative to outputs dir).
+          forecast_horizon:
+            required: false
+            type: integer
+            default: -1
+            description: Steps to forecast; -1 uses the model default.
+          n_finetune:
+            required: false
+            type: number
+            default: 0.05
+            description: Fraction (≤1.0) of samples for fine-tuning; default 0.05.
+            semantic:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+          n_calibration:
+            required: false
+            type: number
+            default: 0.0
+            description: Fraction (≤1.0) for calibration set during fine-tuning; default 0.0 (skip calibration).
+            semantic:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+              rule: Use a fraction, not an absolute count.
+          n_test:
+            required: false
+            type: number
+            default: 0.05
+            description: Fraction (≤1.0) for test evaluation; default 0.05.
+            semantic:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+          conditional_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+          id_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+              data.
+          frequency_sampling:
+            required: false
+            type: string
+            default: oov
+            description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+              ''half_hourly'', ''minutely''. Use '''' or ''oov'' to auto-detect. Never use ISO 8601 like
+              ''1H'' or ''15T''.'
+            semantic:
+              allowed_values:
+              - ''
+              - oov
+              - hourly
+              - 15_minutes
+              - 10_minutes
+              - 5_minutes
+              - half_hourly
+              - minutely
+              rule: Do not use pandas/ISO aliases like '1H' or '15T'.
+          autoregressive_modeling:
+            required: false
+            type: boolean
+            default: true
+            description: Use autoregressive inference; default True. Leave True unless you have a specific
+              reason to disable.
+          include_dataquality_summary:
+            required: false
+            type: boolean
+            default: false
+            description: Attach a data-quality report to the result; default False.
+      run_tsad:
+        description: "Run conformal anomaly detection on TSFM forecasting output.\n\ntsfm_output_json\
+          \ must be the results_file path returned by run_tsfm_forecasting.\nFits (or loads) a conformal\
+          \ AD model and saves anomaly-labelled predictions to CSV.\n\nArgs:\n    dataset_path: Path to\
+          \ the original time-series dataset.\n    tsfm_output_json: Path to JSON predictions file from\
+          \ run_tsfm_forecasting.\n    timestamp_column: Name of the timestamp column.\n    target_columns:\
+          \ Target columns that were forecast.\n    task: 'fit' to train a new AD model, 'inference' to\
+          \ use an existing one.\n    false_alarm: False alarm rate (1 − coverage); default 0.05 → 95%\
+          \ coverage.\n    ad_model_type: 'timeseries_conformal' or 'timeseries_conformal_adaptive'.\n\
+          \    ad_model_checkpoint: Path to an existing AD model (required for 'inference').\n    ad_model_save:\
+          \ Directory to save the fitted AD model.\n    n_calibration: Fraction of data used for calibration\
+          \ (default 0.2).\n    conditional_columns: Exogenous feature columns.\n    id_columns: ID columns\
+          \ for grouped time series.\n    frequency_sampling: Sampling frequency string or None to auto-detect.\n\
+          \    autoregressive_modeling: Set True (default) for pure time-series prediction\n        using\
+          \ the series' own past values. Only set False if you have exogenous\n        features in conditional_columns\
+          \ — without them False will always error.\n        IMPORTANT: tsfm_output_json must come from\
+          \ a SINGLE-column\n        run_tsfm_forecasting call. For multi-column anomaly detection use\n\
+          \        run_integrated_tsad which handles per-column looping automatically.\n"
+        canonical_input_schema:
+          properties:
+            dataset_path:
+              description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+              title: Dataset Path
+              type: string
+            tsfm_output_json:
+              description: Absolute path to the JSON predictions file returned by run_tsfm_forecasting
+                (the results_file field).
+              title: Tsfm Output Json
+              type: string
+            timestamp_column:
+              description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+              title: Timestamp Column
+              type: string
+            target_columns:
+              description: Sensor column names to analyse. Use the full names as returned by the sensors()
+                tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+              items:
+                type: string
+              title: Target Columns
+              type: array
+            task:
+              default: fit
+              description: '''fit'' to train a new AD model (default), ''inference'' to load an existing
+                one (requires ad_model_checkpoint).'
+              title: Task
+              type: string
+            false_alarm:
+              default: 0.05
+              description: False alarm rate (0.0–1.0); default 0.05 → 95% coverage. Lower = fewer false
+                positives but may miss real anomalies.
+              title: False Alarm
+              type: number
+            ad_model_type:
+              default: timeseries_conformal_adaptive
+              description: Must be exactly 'timeseries_conformal' or 'timeseries_conformal_adaptive'.
+                Do not use any other value.
+              title: Ad Model Type
+              type: string
+            ad_model_checkpoint:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Path to an existing AD model checkpoint. Only required when task='inference'.
+              title: Ad Model Checkpoint
+            ad_model_save:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Directory to save the fitted AD model for later reuse. Omit if you don't need
+                to persist the model.
+              title: Ad Model Save
+            n_calibration:
+              default: 0.2
+              description: Fraction of data for calibration (0.0–1.0), default 0.2. Do NOT use absolute
+                counts like 30 or 1000.
+              title: N Calibration
+              type: number
+            conditional_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+              title: Conditional Columns
+            id_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+                data.
+              title: Id Columns
+            frequency_sampling:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+                ''half_hourly'', ''minutely''. Use '''' or None to auto-detect. Never use ISO 8601 like
+                ''1H'' or ''15T''.'
+              title: Frequency Sampling
+            autoregressive_modeling:
+              default: true
+              description: Use autoregressive inference; default True. Leave True unless you have a specific
+                reason to disable.
+              title: Autoregressive Modeling
+              type: boolean
+          required:
+          - dataset_path
+          - tsfm_output_json
+          - timestamp_column
+          - target_columns
+          title: run_tsadArguments
+          type: object
+        parameters:
+          dataset_path:
+            required: true
+            type: string
+            description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+            semantic:
+              format: absolute_file_path
+              expected_source: Usually iot.history_csv.csv_path.
+          tsfm_output_json:
+            required: true
+            type: string
+            description: Absolute path to the JSON predictions file returned by run_tsfm_forecasting (the
+              results_file field).
+          timestamp_column:
+            required: true
+            type: string
+            description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+            semantic:
+              examples:
+              - timestamp
+          target_columns:
+            required: true
+            type: array
+            description: Sensor column names to analyse. Use the full names as returned by the sensors()
+              tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+            items:
+              type: string
+            semantic:
+              rule: Non-empty array of sensor column names. Use full names returned by iot.sensors / history_csv
+                columns; all should belong to the same asset.
+          task:
+            required: false
+            type: string
+            default: fit
+            description: '''fit'' to train a new AD model (default), ''inference'' to load an existing
+              one (requires ad_model_checkpoint).'
+            semantic:
+              allowed_values:
+              - fit
+              - inference
+          false_alarm:
+            required: false
+            type: number
+            default: 0.05
+            description: False alarm rate (0.0–1.0); default 0.05 → 95% coverage. Lower = fewer false
+              positives but may miss real anomalies.
+            semantic:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+          ad_model_type:
+            required: false
+            type: string
+            default: timeseries_conformal_adaptive
+            description: Must be exactly 'timeseries_conformal' or 'timeseries_conformal_adaptive'. Do
+              not use any other value.
+            semantic:
+              allowed_values:
+              - timeseries_conformal
+              - timeseries_conformal_adaptive
+          ad_model_checkpoint:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Path to an existing AD model checkpoint. Only required when task='inference'.
+          ad_model_save:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Directory to save the fitted AD model for later reuse. Omit if you don't need
+              to persist the model.
+          n_calibration:
+            required: false
+            type: number
+            default: 0.2
+            description: Fraction of data for calibration (0.0–1.0), default 0.2. Do NOT use absolute
+              counts like 30 or 1000.
+            semantic:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+              rule: Use a fraction, not an absolute count.
+          conditional_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+          id_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+              data.
+          frequency_sampling:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+              ''half_hourly'', ''minutely''. Use '''' or None to auto-detect. Never use ISO 8601 like
+              ''1H'' or ''15T''.'
+            semantic:
+              allowed_values:
+              - ''
+              - oov
+              - hourly
+              - 15_minutes
+              - 10_minutes
+              - 5_minutes
+              - half_hourly
+              - minutely
+              rule: Do not use pandas/ISO aliases like '1H' or '15T'.
+          autoregressive_modeling:
+            required: false
+            type: boolean
+            default: true
+            description: Use autoregressive inference; default True. Leave True unless you have a specific
+              reason to disable.
+        tool_semantic_rules:
+          tsfm_output_json:
+            format: absolute_json_path
+            expected_source: Must be tsfm.run_tsfm_forecasting.results_file.
+          target_columns:
+            rule: Should match the single target column used in the run_tsfm_forecasting call that produced
+              tsfm_output_json.
+          ad_model_checkpoint:
+            required_when:
+              task: inference
+      run_integrated_tsad:
+        description: "Run end-to-end time-series forecasting + anomaly detection in one call.\n\nFor each\
+          \ target column: runs zero-shot TTM forecasting, then fits a conformal\nAD model and predicts\
+          \ anomaly labels. Saves a combined CSV with anomaly labels\nand KPI scores for all columns.\n\
+          \nArgs:\n    dataset_path: Path to the dataset (CSV/JSON/XLSX).\n    timestamp_column: Name\
+          \ of the timestamp column.\n    target_columns: Columns to run forecasting + anomaly detection\
+          \ on.\n    model_checkpoint: Pre-trained TTM model name (default: ttm_96_28).\n    false_alarm:\
+          \ False alarm rate; default 0.05 → 95% coverage.\n    ad_model_type: 'timeseries_conformal'\
+          \ or 'timeseries_conformal_adaptive'.\n    n_calibration: Fraction of data for AD calibration\
+          \ (default 0.2).\n    conditional_columns: Exogenous feature columns.\n    id_columns: ID columns\
+          \ for grouped time series.\n    frequency_sampling: Sampling frequency string or '' to auto-detect.\n\
+          \    autoregressive_modeling: Set True (default) for pure time-series prediction\n        using\
+          \ the series' own past values. Only set False if you have exogenous\n        features in conditional_columns\
+          \ — without them False will always error.\n        This is the recommended tool for multi-column\
+          \ anomaly detection: it runs\n        forecasting + anomaly detection per column automatically.\n"
+        canonical_input_schema:
+          properties:
+            dataset_path:
+              description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+              title: Dataset Path
+              type: string
+            timestamp_column:
+              description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+              title: Timestamp Column
+              type: string
+            target_columns:
+              description: Sensor column names to analyse. Use the full names as returned by the sensors()
+                tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+              items:
+                type: string
+              title: Target Columns
+              type: array
+            model_checkpoint:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: 'Pre-trained TTM model name: ''ttm_96_28'' (context=96, default) or ''ttm_512_96''
+                (context=512). Omit to use the default.'
+              title: Model Checkpoint
+            false_alarm:
+              default: 0.05
+              description: False alarm rate (0.0–1.0); default 0.05 → 95% coverage. Lower = fewer false
+                positives but may miss real anomalies.
+              title: False Alarm
+              type: number
+            ad_model_type:
+              default: timeseries_conformal_adaptive
+              description: Must be exactly 'timeseries_conformal' or 'timeseries_conformal_adaptive'.
+                Do not use any other value.
+              title: Ad Model Type
+              type: string
+            n_calibration:
+              default: 0.2
+              description: Fraction of data for calibration (0.0–1.0), default 0.2. Do NOT use absolute
+                counts like 30 or 1000.
+              title: N Calibration
+              type: number
+            conditional_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+              title: Conditional Columns
+            id_columns:
+              anyOf:
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+                data.
+              title: Id Columns
+            frequency_sampling:
+              default: ''
+              description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+                ''half_hourly'', ''minutely''. Use '''' or ''oov'' to auto-detect. Never use ISO 8601
+                like ''1H'' or ''15T''.'
+              title: Frequency Sampling
+              type: string
+            autoregressive_modeling:
+              default: true
+              description: Use autoregressive inference; default True. Leave True unless you have a specific
+                reason to disable.
+              title: Autoregressive Modeling
+              type: boolean
+          required:
+          - dataset_path
+          - timestamp_column
+          - target_columns
+          title: run_integrated_tsadArguments
+          type: object
+        parameters:
+          dataset_path:
+            required: true
+            type: string
+            description: Absolute path to a CSV file, e.g. the csv_path returned by history_csv.
+            semantic:
+              format: absolute_file_path
+              expected_source: Usually iot.history_csv.csv_path.
+          timestamp_column:
+            required: true
+            type: string
+            description: Name of the timestamp column in the dataset, e.g. 'timestamp'.
+            semantic:
+              examples:
+              - timestamp
+          target_columns:
+            required: true
+            type: array
+            description: Sensor column names to analyse. Use the full names as returned by the sensors()
+              tool, e.g. ['Chiller 3 Supply Temperature']. All columns must belong to the same asset.
+            items:
+              type: string
+            semantic:
+              rule: Non-empty array of sensor column names. Use full names returned by iot.sensors / history_csv
+                columns; all should belong to the same asset.
+          model_checkpoint:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: 'Pre-trained TTM model name: ''ttm_96_28'' (context=96, default) or ''ttm_512_96''
+              (context=512). Omit to use the default.'
+            semantic:
+              allowed_values:
+              - ttm_96_28
+              - ttm_512_96
+              - null
+              rule: May also be an absolute checkpoint path if explicitly available.
+          false_alarm:
+            required: false
+            type: number
+            default: 0.05
+            description: False alarm rate (0.0–1.0); default 0.05 → 95% coverage. Lower = fewer false
+              positives but may miss real anomalies.
+            semantic:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+          ad_model_type:
+            required: false
+            type: string
+            default: timeseries_conformal_adaptive
+            description: Must be exactly 'timeseries_conformal' or 'timeseries_conformal_adaptive'. Do
+              not use any other value.
+            semantic:
+              allowed_values:
+              - timeseries_conformal
+              - timeseries_conformal_adaptive
+          n_calibration:
+            required: false
+            type: number
+            default: 0.2
+            description: Fraction of data for calibration (0.0–1.0), default 0.2. Do NOT use absolute
+              counts like 30 or 1000.
+            semantic:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+              rule: Use a fraction, not an absolute count.
+          conditional_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: Exogenous / conditional feature columns. Pass None unless you have known covariates.
+          id_columns:
+            required: false
+            type:
+            - array
+            - 'null'
+            default: null
+            description: ID columns for grouped time series, e.g. ['asset_id']. Pass None for single-entity
+              data.
+          frequency_sampling:
+            required: false
+            type: string
+            default: ''
+            description: 'Sampling frequency: ''hourly'', ''15_minutes'', ''10_minutes'', ''5_minutes'',
+              ''half_hourly'', ''minutely''. Use '''' or ''oov'' to auto-detect. Never use ISO 8601 like
+              ''1H'' or ''15T''.'
+            semantic:
+              allowed_values:
+              - ''
+              - oov
+              - hourly
+              - 15_minutes
+              - 10_minutes
+              - 5_minutes
+              - half_hourly
+              - minutely
+              rule: Do not use pandas/ISO aliases like '1H' or '15T'.
+          autoregressive_modeling:
+            required: false
+            type: boolean
+            default: true
+            description: Use autoregressive inference; default True. Leave True unless you have a specific
+              reason to disable.
+        tool_semantic_rules:
+          rule: Preferred TSFM anomaly-detection tool for multi-column target_columns.
+  wo:
+    entrypoint: wo-mcp-server
+    tools:
+      get_work_orders:
+        description: "Retrieve all work orders for a specific equipment within an optional date range.\n\
+          \nArgs:\n    equipment_id: Equipment name or identifier, e.g. ``\"Chiller 6\"`` or ``\"CWC04013\"\
+          ``.\n    start_date: Start of date range (inclusive), format ``YYYY-MM-DD``.\n    end_date:\
+          \ End of date range (inclusive), format ``YYYY-MM-DD``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+            start_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: Start Date
+            end_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: End Date
+          required:
+          - equipment_id
+          title: get_work_ordersArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+          start_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+          end_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+              ordering_rule: If provided with start_date, end_date must be on or after start_date.
+      get_preventive_work_orders:
+        description: "Retrieve only preventive work orders for a specific equipment within an optional\
+          \ date range.\n\nArgs:\n    equipment_id: Equipment name or identifier, e.g. ``\"Chiller 6\"\
+          `` or ``\"CWC04013\"``.\n    start_date: Start of date range (inclusive), format ``YYYY-MM-DD``.\n\
+          \    end_date: End of date range (inclusive), format ``YYYY-MM-DD``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+            start_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: Start Date
+            end_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: End Date
+          required:
+          - equipment_id
+          title: get_preventive_work_ordersArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+          start_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+          end_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+              ordering_rule: If provided with start_date, end_date must be on or after start_date.
+      get_corrective_work_orders:
+        description: "Retrieve only corrective work orders for a specific equipment within an optional\
+          \ date range.\n\nArgs:\n    equipment_id: Equipment name or identifier, e.g. ``\"Chiller 6\"\
+          `` or ``\"CWC04013\"``.\n    start_date: Start of date range (inclusive), format ``YYYY-MM-DD``.\n\
+          \    end_date: End of date range (inclusive), format ``YYYY-MM-DD``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+            start_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: Start Date
+            end_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: End Date
+          required:
+          - equipment_id
+          title: get_corrective_work_ordersArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+          start_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+          end_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+              ordering_rule: If provided with start_date, end_date must be on or after start_date.
+      get_events:
+        description: "Retrieve all events (work orders, alerts, anomalies) for a specific equipment within\
+          \ an optional date range.\n\nArgs:\n    equipment_id: Equipment name or identifier, e.g. ``\"\
+          Chiller 6\"`` or ``\"CWC04013\"``.\n    start_date: Start of date range (inclusive), format\
+          \ ``YYYY-MM-DD``.\n    end_date: End of date range (inclusive), format ``YYYY-MM-DD``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+            start_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: Start Date
+            end_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: End Date
+          required:
+          - equipment_id
+          title: get_eventsArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+          start_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+          end_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+              ordering_rule: If provided with start_date, end_date must be on or after start_date.
+      get_failure_codes:
+        description: Retrieve all available failure codes with their categories and descriptions.
+        canonical_input_schema:
+          properties: {}
+          title: get_failure_codesArguments
+          type: object
+        parameters: {}
+      get_work_order_distribution:
+        description: "Calculate the distribution of work order types (by failure code) for a specific\
+          \ equipment.\n\nReturns counts per (primary_code, secondary_code) pair, sorted by frequency\
+          \ descending.\n\nArgs:\n    equipment_id: Equipment name or identifier, e.g. ``\"Chiller 6\"\
+          `` or ``\"CWC04013\"``.\n    start_date: Start of date range (inclusive), format ``YYYY-MM-DD``.\n\
+          \    end_date: End of date range (inclusive), format ``YYYY-MM-DD``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+            start_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: Start Date
+            end_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: End Date
+          required:
+          - equipment_id
+          title: get_work_order_distributionArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+          start_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+          end_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+              ordering_rule: If provided with start_date, end_date must be on or after start_date.
+      predict_next_work_order:
+        description: "Predict the probabilities of the next expected work order types based on historical\
+          \ transition patterns.\n\nUses a Markov-chain transition matrix built from the sequence of past\
+          \ work order\nprimary codes to estimate what type of work order is likely to follow the most\n\
+          recent one. Requires at least 1 year of work order history to produce meaningful\nprobability\
+          \ distributions. Short windows (< 1 year) often yield a single transition\nwith probability\
+          \ 1.0.\n\nArgs:\n    equipment_id: Equipment name or identifier, e.g. ``\"Chiller 6\"`` or ``\"\
+          CWC04013\"``.\n    start_date: Start of date range (inclusive), format ``YYYY-MM-DD``.\n   \
+          \ end_date: End of date range (inclusive), format ``YYYY-MM-DD``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+            start_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: Start Date
+            end_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: End Date
+          required:
+          - equipment_id
+          title: predict_next_work_orderArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+          start_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+          end_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+              ordering_rule: If provided with start_date, end_date must be on or after start_date.
+      get_alert_rules:
+        description: "List all alert rule IDs that have fired for a specific equipment.\n\nCall this before\
+          \ analyze_alert_to_failure to discover valid rule_id values.\n\nArgs:\n    equipment_id: Equipment\
+          \ name or identifier, e.g. ``\"Chiller 6\"`` or ``\"CWC04013\"``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+          required:
+          - equipment_id
+          title: get_alert_rulesArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+      analyze_alert_to_failure:
+        description: "Analyze the relationship between a specific alert rule and subsequent maintenance\
+          \ events.\n\nComputes the probability that each alert occurrence leads to a work order (vs no\n\
+          maintenance) and the average time-to-maintenance in hours. Requires at least 90 days\nof alert\
+          \ history to compute meaningful transitions — omit start_date/end_date to use\nall available\
+          \ history.\n\nArgs:\n    equipment_id: Equipment name or identifier, e.g. ``\"Chiller 6\"``\
+          \ or ``\"CWC04013\"``.\n    rule_id: Alert rule identifier, e.g. ``\"CR00002\"``.\n    start_date:\
+          \ Start of date range (inclusive), format ``YYYY-MM-DD``.\n    end_date: End of date range (inclusive),\
+          \ format ``YYYY-MM-DD``.\n"
+        canonical_input_schema:
+          properties:
+            equipment_id:
+              description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using
+                the asset name exactly as it appears in prior step results.
+              title: Equipment Id
+              type: string
+            rule_id:
+              description: Alert rule ID from get_alert_rules, e.g. 'RUL0012'. Must be a valid rule that
+                has fired for this equipment — call get_alert_rules first.
+              title: Rule Id
+              type: string
+            start_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: Start Date
+            end_date:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+              title: End Date
+          required:
+          - equipment_id
+          - rule_id
+          title: analyze_alert_to_failureArguments
+          type: object
+        parameters:
+          equipment_id:
+            required: true
+            type: string
+            description: Equipment name or identifier, e.g. 'Chiller 6' or 'CWC04013'. Prefer using the
+              asset name exactly as it appears in prior step results.
+            semantic:
+              examples:
+              - Chiller 6
+              - CWC04013
+              rule: Prefer the exact asset or equipment identifier from prior tool results.
+          rule_id:
+            required: true
+            type: string
+            description: Alert rule ID from get_alert_rules, e.g. 'RUL0012'. Must be a valid rule that
+              has fired for this equipment — call get_alert_rules first.
+          start_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+          end_date:
+            required: false
+            type:
+            - string
+            - 'null'
+            default: null
+            description: Date in YYYY-MM-DD format, e.g. '2020-06-20'. Omit to use all available history.
+            semantic:
+              format: yyyy-mm-dd_or_null
+              example: '2020-06-20'
+              ordering_rule: If provided with start_date, end_date must be on or after start_date.
+        tool_semantic_rules:
+          rule_id:
+            expected_source: Must come from wo.get_alert_rules for the same equipment_id.

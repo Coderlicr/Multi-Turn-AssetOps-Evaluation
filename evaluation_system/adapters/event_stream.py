@@ -171,6 +171,139 @@ def _append_planning_trace(plan: list[str], block: list[dict[str, Any]], idx: in
         plan.append(f"recovery: failed {' -> '.join(failed)}; replanned/re-executed")
 
 
+def _has_final_response(block: list[dict[str, Any]]) -> bool:
+    for ev in block:
+        if ev.get("task_type") != "final_response":
+            continue
+        if _event_status_ok(ev.get("status")) and isinstance(ev.get("final_response"), str):
+            if ev["final_response"].strip():
+                return True
+    return False
+
+
+def _event_has_failed_tool(ev: dict[str, Any]) -> bool:
+    return bool(_failed_tool_names(ev))
+
+
+def _event_has_success_tool(ev: dict[str, Any]) -> bool:
+    for tc in ev.get("tool_calls") or []:
+        if isinstance(tc, dict) and _event_status_ok(tc.get("status")):
+            return True
+    return False
+
+
+def _event_failed(ev: dict[str, Any]) -> bool:
+    return (not _event_status_ok(ev.get("status"))) or _event_has_failed_tool(ev)
+
+
+def _is_plan_execute_block(block: list[dict[str, Any]]) -> bool:
+    for ev in block:
+        role = str(ev.get("agent_role") or "").lower()
+        task = str(ev.get("task_type") or "").lower()
+        if role in {"planner", "executor"}:
+            return True
+        if isinstance(ev.get("plan"), dict) or ev.get("plan_kind") is not None:
+            return True
+        if task in {"plan_generation", "plan_execution", "replan_generation"}:
+            return True
+    return False
+
+
+def _is_execution_event(ev: dict[str, Any]) -> bool:
+    role = str(ev.get("agent_role") or "").lower()
+    task = str(ev.get("task_type") or "").lower()
+    return role == "executor" or "execute" in task or "execution" in task
+
+
+def _successful_execution_event(ev: dict[str, Any]) -> bool:
+    return (
+        _is_execution_event(ev)
+        and _event_status_ok(ev.get("status"))
+        and not _event_has_failed_tool(ev)
+        and _event_has_success_tool(ev)
+    )
+
+
+def _plan_execute_recovered(block: list[dict[str, Any]]) -> bool:
+    """Plan-execute recovery requires a later replan and a new successful execution event."""
+    failed_indices = [i for i, ev in enumerate(block) if _event_failed(ev)]
+    if not failed_indices:
+        return True
+    last_failed_idx = failed_indices[-1]
+    replan_idx = next(
+        (i for i in range(last_failed_idx + 1, len(block)) if _is_replan_event(block[i])),
+        None,
+    )
+    if replan_idx is None:
+        return False
+    return any(_successful_execution_event(ev) for ev in block[replan_idx + 1:])
+
+
+def _supervisor_specialist_recovered(block: list[dict[str, Any]]) -> bool:
+    """Supervisor-specialist recovery is scoped to each failing agent_role.
+
+    Specialists are ReAct-style, so a failure can be recovered by later successful
+    tool calls from the same specialist, including later calls within the same event.
+    Other specialists' successful work does not repair this specialist's failure.
+    """
+    role_actions: dict[str, list[tuple[bool, bool]]] = {}
+    for ev in block:
+        role = str(ev.get("agent_role") or "").strip() or "unknown"
+        if ev.get("task_type") == "final_response":
+            continue
+        actions = role_actions.setdefault(role, [])
+        if not _event_status_ok(ev.get("status")):
+            actions.append((False, False))
+        for tc in ev.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            ok = _event_status_ok(tc.get("status"))
+            actions.append((ok, ok))
+
+    for actions in role_actions.values():
+        failed_positions = [idx for idx, (ok, _has_success_tool) in enumerate(actions) if not ok]
+        if not failed_positions:
+            continue
+        last_failed = failed_positions[-1]
+        after = actions[last_failed + 1:]
+        if not after:
+            return False
+        if any(not ok for ok, _has_success_tool in after):
+            return False
+        if not any(has_success_tool for _ok, has_success_tool in after):
+            return False
+    return True
+
+
+def _turn_status_from_events(
+    block: list[dict[str, Any]],
+    *,
+    agent_response: str,
+    tool_calls: list[ToolCallRecord],
+    previous_turns: list[DialogTurn],
+) -> TurnStatus:
+    has_failure = any(_event_failed(ev) for ev in block)
+    has_final = _has_final_response(block)
+
+    if has_failure:
+        recovered = (
+            _plan_execute_recovered(block)
+            if _is_plan_execute_block(block)
+            else _supervisor_specialist_recovered(block)
+        )
+        return TurnStatus.SUCCESS if recovered and has_final else TurnStatus.FAILED
+
+    if agent_response:
+        return TurnStatus.SUCCESS
+    if tool_calls:
+        return TurnStatus.UNKNOWN
+    return (
+        TurnStatus.SUCCESS
+        if previous_turns and previous_turns[-1].turn_status == TurnStatus.SUCCESS
+        else TurnStatus.UNKNOWN
+    )
+
+
 class AssetOpsEventStreamAdapter(BaseDialogAdapter):
     """JSONL agent event-stream → DialogRecord, joined with DESIGN.md spec."""
 
@@ -242,6 +375,7 @@ class AssetOpsEventStreamAdapter(BaseDialogAdapter):
                     if not isinstance(tc, dict):
                         continue
                     tool_name = str(tc.get("tool_name") or "unknown")
+                    tool_server = str(tc.get("server") or "").strip() or None
                     args = tc.get("args") if isinstance(tc.get("args"), dict) else {}
                     status = str(tc.get("status") or "ok")
                     success = status in {"ok", "success"}
@@ -259,6 +393,7 @@ class AssetOpsEventStreamAdapter(BaseDialogAdapter):
                         ToolCallRecord(
                             tool_name=tool_name,
                             tool_agent=role,
+                            tool_server=tool_server,
                             input_arguments=args,
                             input_summary=None,
                             output_summary=output_summary,
@@ -269,21 +404,12 @@ class AssetOpsEventStreamAdapter(BaseDialogAdapter):
                         )
                     )
 
-            if any_event_failed:
-                turn_status = TurnStatus.FAILED
-            elif agent_response:
-                turn_status = TurnStatus.SUCCESS
-            elif tool_calls:
-                turn_status = TurnStatus.UNKNOWN
-            else:
-                # Pure supervisor wrap-up turn (no tool_calls, no final_response).
-                # When it follows a successful final_response, treat it as part of
-                # that successful trajectory rather than a fresh failed turn.
-                turn_status = (
-                    TurnStatus.SUCCESS
-                    if turns and turns[-1].turn_status == TurnStatus.SUCCESS
-                    else TurnStatus.UNKNOWN
-                )
+            turn_status = _turn_status_from_events(
+                block,
+                agent_response=agent_response,
+                tool_calls=tool_calls,
+                previous_turns=turns,
+            )
 
             turns.append(
                 DialogTurn(
@@ -295,7 +421,7 @@ class AssetOpsEventStreamAdapter(BaseDialogAdapter):
                     tool_calls=tool_calls,
                     turn_result="",
                     turn_status=turn_status,
-                    recovery_triggered=any_call_failed,
+                    recovery_triggered=any_event_failed or any_call_failed,
                 )
             )
 
