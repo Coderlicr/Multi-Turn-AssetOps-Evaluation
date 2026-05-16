@@ -63,6 +63,114 @@ def _turn_id_int(turn_id_str: str, fallback: int) -> int:
     return fallback
 
 
+def _event_status_ok(status: object) -> bool:
+    return str(status or "ok") in {"ok", "success"}
+
+
+def _tool_display_name(tool_call: dict[str, Any]) -> str:
+    """Return a comparable tool name for planning traces.
+
+    Some plan-execute logs store ``server`` separately and use bare tool names
+    (``history_csv``), while supervisor-specialist logs usually store fully
+    qualified names (``iot.history_csv``). Keep persisted ToolCallRecord names
+    unchanged, but normalize the planning trace text.
+    """
+    name = str(tool_call.get("tool_name") or tool_call.get("tool") or "unknown").strip()
+    server = str(tool_call.get("server") or "").strip()
+    if server and name and "." not in name:
+        return f"{server}.{name}"
+    return name or "unknown"
+
+
+def _unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _planned_tool_sequence(ev: dict[str, Any]) -> list[str]:
+    plan = ev.get("plan")
+    if not isinstance(plan, dict):
+        return []
+    steps = plan.get("steps")
+    if not isinstance(steps, list):
+        return []
+    tools: list[str] = []
+    for st in steps:
+        if not isinstance(st, dict):
+            continue
+        tool_name = _tool_display_name(st)
+        if tool_name != "unknown":
+            tools.append(tool_name)
+    return _unique_preserve_order(tools)
+
+
+def _executed_tool_sequence(ev: dict[str, Any]) -> list[str]:
+    tools: list[str] = []
+    for tc in ev.get("tool_calls") or []:
+        if isinstance(tc, dict):
+            tools.append(_tool_display_name(tc))
+    return _unique_preserve_order(tools)
+
+
+def _is_replan_event(ev: dict[str, Any]) -> bool:
+    task = str(ev.get("task_type") or "").lower()
+    kind = str(ev.get("plan_kind") or "").lower()
+    return "replan" in task or kind == "replan"
+
+
+def _failed_tool_names(ev: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for tc in ev.get("tool_calls") or []:
+        if not isinstance(tc, dict):
+            continue
+        if not _event_status_ok(tc.get("status")):
+            out.append(_tool_display_name(tc))
+    return _unique_preserve_order(out)
+
+
+def _has_later_recovery_marker(block: list[dict[str, Any]], start_idx: int) -> bool:
+    for later in block[start_idx + 1:]:
+        if _is_replan_event(later):
+            return True
+        task = str(later.get("task_type") or "").lower()
+        if "execute" in task and _event_status_ok(later.get("status")):
+            return True
+    return False
+
+
+def _append_planning_trace(plan: list[str], block: list[dict[str, Any]], idx: int, ev: dict[str, Any]) -> None:
+    """Append architecture-neutral planning evidence for a single event."""
+    role = str(ev.get("agent_role") or "").strip()
+    task = str(ev.get("task_type") or "").strip()
+    planned_tools = _planned_tool_sequence(ev)
+    executed_tools = _executed_tool_sequence(ev)
+
+    if planned_tools:
+        label = "planned tools (replan)" if _is_replan_event(ev) else "planned tools"
+        plan.append(f"{label}: {' -> '.join(planned_tools)}")
+
+    if executed_tools:
+        if role == "executor" and task == "plan_execution":
+            plan.append(f"executed tools: {' -> '.join(executed_tools)}")
+        elif role or task:
+            plan.append(f"workflow: {role or 'unknown'} -> {task or 'unknown'}")
+            plan.append(f"executed tools: {' -> '.join(executed_tools)}")
+        else:
+            plan.append(f"executed tools: {' -> '.join(executed_tools)}")
+    elif not planned_tools and (role or task):
+        plan.append(f"workflow: {role or 'unknown'} -> {task or 'unknown'}")
+
+    failed = _failed_tool_names(ev)
+    if failed and _has_later_recovery_marker(block, idx):
+        plan.append(f"recovery: failed {' -> '.join(failed)}; replanned/re-executed")
+
+
 class AssetOpsEventStreamAdapter(BaseDialogAdapter):
     """JSONL agent event-stream → DialogRecord, joined with DESIGN.md spec."""
 
@@ -124,11 +232,10 @@ class AssetOpsEventStreamAdapter(BaseDialogAdapter):
             any_event_failed = False
             any_call_failed = False
 
-            for ev in block:
+            for ev_idx, ev in enumerate(block):
                 role = str(ev.get("agent_role") or "")
                 task = str(ev.get("task_type") or "")
-                if role or task:
-                    plan.append(f"{role}: {task}".strip(": "))
+                _append_planning_trace(plan, block, ev_idx, ev)
                 if str(ev.get("status") or "ok") not in {"ok", "success"}:
                     any_event_failed = True
                 for tc in ev.get("tool_calls") or []:
