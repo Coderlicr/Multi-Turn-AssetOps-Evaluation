@@ -7,7 +7,6 @@ from typing import Any, Optional
 from evaluation_system.adapters.base import BaseDialogAdapter
 from evaluation_system.adapters.event_stream import AssetOpsEventStreamAdapter
 from evaluation_system.adapters.example import ExampleDialogAdapter
-from evaluation_system.adapters.qa_history_rollout import QAHistoryRolloutAdapter
 
 
 class AdapterRegistry:
@@ -64,5 +63,4 @@ def default_registry(
     reg = AdapterRegistry()
     reg.register(ExampleDialogAdapter(), overwrite=True)
     reg.register(AssetOpsEventStreamAdapter(dialog_specs=dialog_specs), overwrite=True)
-    reg.register(QAHistoryRolloutAdapter(dialog_specs=dialog_specs), overwrite=True)
     return reg

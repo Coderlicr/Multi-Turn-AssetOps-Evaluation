@@ -31,12 +31,14 @@ data/
 
 **Filename convention:** files should match `dialog<N>...jsonl` where `<N>` aligns with dialogs in `DESIGN.md` (e.g. `dialog1.jsonl`, `dialog01_case_xyz.jsonl`).
 
-**JSONL rollout formats:** the loader auto-detects:
+**JSONL rollout format:** all model rollouts use the AssetOps event-stream schema:
 
-- **Event stream** (``model_b``-style): one timestamped agent event per line; final text on ``task_type=final_response``.
-- **QA / history** (``model_a``-style): one JSON object per user turn — ``question``, ``answer``, ``plans``, ``history[]`` (tool rows with ``server``, ``tool``, ``success``, …).
+- one timestamped agent event per line;
+- ``turn_id`` groups events into dialog turns;
+- ``tool_calls[]`` records tool invocations;
+- final text is carried by an event with ``task_type=final_response``.
 
-Force with ``--adapter assetops_event_stream_v1`` or ``--adapter qa_history_rollout_v1`` if needed. Both attach the same DESIGN ground truth via ``dialog_specs.json``.
+Force with ``--adapter assetops_event_stream_v1`` if needed. The adapter attaches DESIGN ground truth via ``dialog_specs.json``.
 
 `run-all` (see §2) regenerates `dialog_specs.json` automatically every run; you can also do it manually:
 

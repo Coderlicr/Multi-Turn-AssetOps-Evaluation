@@ -134,37 +134,6 @@ def _load_jsonl_events(path: Path) -> list[dict[str, Any]]:
     return out
 
 
-def _infer_jsonl_rollout_kind(rows: list[dict[str, Any]]) -> str:
-    """
-    Distinguish AssetOps event-stream JSONL vs. ``model_a`` QA/history JSONL.
-
-    Returns ``"qa_history"`` or ``"event_stream"``.
-    """
-    if not rows:
-        return "event_stream"
-    r0 = rows[0]
-
-    fmt = r0.get("eval_format") or r0.get("rollout_format")
-    if isinstance(fmt, str):
-        f = fmt.strip().lower()
-        if f in {"qa_history", "qa-history", "question_answer"}:
-            return "qa_history"
-        if f in {"assetops", "event_stream", "assetops_event_stream"}:
-            return "event_stream"
-
-    # Event stream: chronological events with timestamps / task types.
-    if r0.get("timestamp") and (r0.get("task_type") is not None or r0.get("case_id") is not None):
-        return "event_stream"
-    if r0.get("agent_role") and r0.get("task_type"):
-        return "event_stream"
-
-    # QA rollout: one object per user turn with optional tool history.
-    if isinstance(r0.get("question"), str) and ("history" in r0 or r0.get("plans") is not None):
-        return "qa_history"
-
-    return "event_stream"
-
-
 def load_one_event_stream_jsonl(
     path: Path,
     *,
@@ -205,42 +174,19 @@ def load_one_dialog_autodetect(
     Load any supported dialog file → canonical, automatically-evaluated DialogRecord.
 
     Routing:
-    - ``.jsonl`` Auto-detect: AssetOps **event-stream** logs vs. ``model_a``-style
-      **question / answer / plans / history** (one JSON object per user turn). Use
-      ``--adapter qa_history_rollout_v1`` or ``assetops_event_stream_v1`` to force.
-      Ground truth still comes from ``dialog_specs.json`` via the registry.
+    - ``.jsonl`` files are AssetOps **event-stream** logs. Ground truth still
+      comes from ``dialog_specs.json`` via the registry.
     - ``.json`` files first try to validate as a canonical DialogRecord, then
       fall back to adapter-based normalization (back-compat path).
     """
     reg = registry or default_registry()
     if path.suffix.lower() == ".jsonl":
-        rows = _load_jsonl_events(path)
-        if not rows:
-            raise ValueError(f"No JSON lines in {path}")
         explicit = adapter_name.strip() if isinstance(adapter_name, str) and adapter_name.strip() else None
-        if explicit == "qa_history_rollout_v1":
-            kind = "qa_history"
-        elif explicit == "assetops_event_stream_v1":
-            kind = "event_stream"
-        else:
-            kind = _infer_jsonl_rollout_kind(rows)
-        if kind == "qa_history":
-            raw = {
-                "adapter_name": "qa_history_rollout_v1",
-                "segments": rows,
-                "dialog_id_int": parse_dialog_id_from_filename(path.stem),
-                "case_id_str": path.stem,
-                "model_name": model_name,
-            }
-            res = normalize_dialog(
-                raw,
-                adapter_name="qa_history_rollout_v1",
-                mode=mode,
-                registry=reg,
+        if explicit and explicit != "assetops_event_stream_v1":
+            raise ValueError(
+                f"JSONL input now supports only assetops_event_stream_v1; got {explicit!r}"
             )
-            d = res.dialog
-        else:
-            d = load_one_event_stream_jsonl(path, model_name=model_name, registry=reg, mode=mode)
+        d = load_one_event_stream_jsonl(path, model_name=model_name, registry=reg, mode=mode)
     else:
         data = load_raw_json_file(path)
         try:
