@@ -226,7 +226,11 @@ def _successful_execution_event(ev: dict[str, Any]) -> bool:
 
 def _plan_execute_recovered(block: list[dict[str, Any]]) -> bool:
     """Plan-execute recovery requires a later replan and a new successful execution event."""
-    failed_indices = [i for i, ev in enumerate(block) if _event_failed(ev)]
+    # Plan-execute logs may mark the whole execution event failed because an
+    # unexecuted/skipped plan step had server/tool set to "None". That is a plan
+    # artifact, not a tool-call failure, so recovery is triggered only by failed
+    # tool_calls.
+    failed_indices = [i for i, ev in enumerate(block) if _event_has_failed_tool(ev)]
     if not failed_indices:
         return True
     last_failed_idx = failed_indices[-1]
@@ -282,13 +286,18 @@ def _turn_status_from_events(
     tool_calls: list[ToolCallRecord],
     previous_turns: list[DialogTurn],
 ) -> TurnStatus:
-    has_failure = any(_event_failed(ev) for ev in block)
+    is_plan_execute = _is_plan_execute_block(block)
+    has_failure = (
+        any(_event_has_failed_tool(ev) for ev in block)
+        if is_plan_execute
+        else any(_event_failed(ev) for ev in block)
+    )
     has_final = _has_final_response(block)
 
     if has_failure:
         recovered = (
             _plan_execute_recovered(block)
-            if _is_plan_execute_block(block)
+            if is_plan_execute
             else _supervisor_specialist_recovered(block)
         )
         return TurnStatus.SUCCESS if recovered and has_final else TurnStatus.FAILED
@@ -302,6 +311,12 @@ def _turn_status_from_events(
         if previous_turns and previous_turns[-1].turn_status == TurnStatus.SUCCESS
         else TurnStatus.UNKNOWN
     )
+
+
+def _recovery_triggered(block: list[dict[str, Any]]) -> bool:
+    if _is_plan_execute_block(block):
+        return any(_event_has_failed_tool(ev) for ev in block)
+    return any(_event_failed(ev) for ev in block)
 
 
 class AssetOpsEventStreamAdapter(BaseDialogAdapter):
@@ -421,7 +436,7 @@ class AssetOpsEventStreamAdapter(BaseDialogAdapter):
                     tool_calls=tool_calls,
                     turn_result="",
                     turn_status=turn_status,
-                    recovery_triggered=any_event_failed or any_call_failed,
+                    recovery_triggered=_recovery_triggered(block),
                 )
             )
 
