@@ -8,10 +8,6 @@ DialogRecord  →  automatic eval  →  LLM judge  →  aggregation  →
 leaderboard + comparison figures
 ```
 
-**Chinese documentation:** [README.zh.md](README.zh.md)
-
----
-
 ## 0. Data layout
 
 ```
@@ -35,10 +31,13 @@ data/
 
 - one timestamped agent event per line;
 - ``turn_id`` groups events into dialog turns;
-- ``tool_calls[]`` records tool invocations;
+- ``tool_calls[]`` records tool invocations, including optional ``server`` plus ``tool_name``;
+- planner/executor logs may include ``plan.steps`` and ``plan_kind=replan``;
 - final text is carried by an event with ``task_type=final_response``.
 
 Force with ``--adapter assetops_event_stream_v1`` if needed. The adapter attaches DESIGN ground truth via ``dialog_specs.json``.
+
+The adapter builds an architecture-neutral ``intermediate_plan`` for fair comparison across plan-execute and supervisor-specialist traces. It summarizes workflows, planned tool sequences, executed tool sequences, and recovery markers such as failed tool calls followed by replanning/re-execution.
 
 `run-all` (see §2) regenerates `dialog_specs.json` automatically every run; you can also do it manually:
 
@@ -53,17 +52,23 @@ python scripts/parse_design_md.py --design ./data/DESIGN.md --out ./data/dialog_
 
 The leaderboard always emits `Model | 7 metric columns`. Subjective scores are in \([0,1]\); automatic metrics are rates in \([0,1]\) or `n/a`.
 
+For full formulas, per-dialog definitions, aggregation rules, and recovery/schema edge cases, see [METRICS.md](METRICS.md).
+
 | Metric | Meaning | Per-dialog | Corpus aggregation |
 |--------|---------|------------|----------------------|
 | **Planning Effectiveness** | Subjective planning | from `llm_evaluation` / `human_evaluation` | macro avg \(\tfrac{1}{N}\sum_i s_i\) |
 | **Tool Usage Quality** | Subjective tool use | same | same |
 | **Task Completion** | Subjective completion | same | same |
 | **Tool Name Validity** | Legal tool-name rate | legal / total | micro avg over all calls |
-| **Schema Compliance** | Schema valid among legal names | schema_ok / legal | micro avg |
+| **Schema Compliance** | Argument structure valid among legal names | schema_ok / legal | micro avg |
 | **Execution Success Rate** | Tool exec success | exec_ok / total | micro avg |
-| **Recovery Success Rate** | Recovery → final success | dialog had retry/replanning AND last turn succeeded | dialog-level rate |
+| **Recovery Success Rate** | Recovery → final success | dialogs with recovery_triggered: last turn succeeded | dialog-level rate; `n/a` when no recovery was triggered |
 
 Rows are sorted alphabetically by model name. **Subjective source:** `leaderboard --metric-source llm|human|automatic` selects `llm_evaluation`, `human_evaluation`, or leaves the first three columns blank (automatic-only view).
+
+**Schema Compliance details:** tool existence and argument schemas are validated against `schema_compliance_schema.yaml`. Bare tool names are resolved when unique; otherwise the adapter combines ``server`` + ``tool_name`` as ``server.tool``. Compliance checks are structural: arguments must be an object, required arguments must be present, unknown arguments are rejected, and JSON value types must match the canonical input schema.
+
+**Recovery details:** plan-execute traces trigger recovery only on failed tool calls, not on skipped/unexecuted plan artifacts. Supervisor-specialist traces scope recovery to the failing specialist role and require later successful work from that same role.
 
 ---
 
@@ -89,7 +94,7 @@ python main.py run-all --judge mock
 What `run-all` does, in order:
 
 1. parses `data/DESIGN.md` → `data/dialog_specs.json` (re-runs every time so spec edits are picked up automatically);
-2. discovers per-model rollouts under `data/<model>/`, runs the LLM judge over each, and writes canonical `DialogRecord` JSON to `data/_judged/<model>/<dialog_id>.json`;
+2. discovers per-model rollouts under `data/<model>/`, groups same-stem dialog files across model folders, runs the paired LLM judge by default, and writes canonical `DialogRecord` JSON to `data/_judged/<model>/<dialog_id>.json`;
 3. aggregates the corpus and writes `data/_leaderboard/leaderboard_metrics.{txt,csv,json}` plus the table to stdout;
 4. writes `metrics_radar.png` (radar overlay of the seven \[0,1\] metrics under `automatic_evaluation`) into `data/_leaderboard/figures/`. Skip this step with `--no-figures` when matplotlib is unavailable.
 
@@ -119,6 +124,10 @@ Sample figure: `metrics_radar.png` overlays one polygon per model on the seven u
 ## 3. LLM-as-Judge
 
 The judge consumes a `DialogRecord` (already enriched with `ground_truth.expected_tools / expected_plan / expected_final_answer / task_success_criteria`), prompts an LLM in JSON mode, and writes the three subjective scores back into `llm_evaluation`.
+
+Directory inputs use **paired mode by default**. Same-stem files from different model folders (for example `model_a/dialog1.jsonl` and `model_b/dialog1.jsonl`) are scored in one shared prompt as `candidate_a`, `candidate_b`, … so the subjective scores are calibrated against the same ground truth and rubric context. Single-candidate groups automatically fall back to single scoring.
+
+Use `--judge-mode single` when you intentionally want to score each file independently.
 
 ### 3.1 Backends
 
@@ -152,6 +161,11 @@ python main.py llm-judge \
   --judge openai --model gpt-4.1 \
   --runs 3 --seed 1337
 
+# Independent per-file scoring instead of paired same-dialog scoring
+python main.py llm-judge \
+  --input ./data/_evaluated --out ./data/_judged \
+  --judge-mode single
+
 # Reasoning-class models (o1/o3/o4 ignore --temperature automatically)
 python main.py llm-judge --input ./data/_evaluated --model o4-mini
 
@@ -170,7 +184,7 @@ Use `--continue-on-error` to keep going on per-file failures; the run exits with
 
 Request: one `system` message ("return only JSON") + one `user` message produced by `evaluators/llm_judge/prompt.py`, `response_format={"type": "json_object"}`.
 
-Response:
+Single-mode response:
 
 ```json
 {
@@ -181,6 +195,33 @@ Response:
     "planning_comment": "",
     "tool_comment": "",
     "task_comment": ""
+  }
+}
+```
+
+Paired-mode response:
+
+```json
+{
+  "candidate_a": {
+    "planning_effectiveness": 0.0,
+    "tool_usage_quality": 0.0,
+    "task_completion": 0.0,
+    "reasoning": {
+      "planning_comment": "",
+      "tool_comment": "",
+      "task_comment": ""
+    }
+  },
+  "candidate_b": {
+    "planning_effectiveness": 0.0,
+    "tool_usage_quality": 0.0,
+    "task_completion": 0.0,
+    "reasoning": {
+      "planning_comment": "",
+      "tool_comment": "",
+      "task_comment": ""
+    }
   }
 }
 ```
