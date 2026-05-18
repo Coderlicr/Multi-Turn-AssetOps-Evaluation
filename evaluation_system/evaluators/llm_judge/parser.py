@@ -104,3 +104,58 @@ def parse_judge_output_to_llm_evaluation(
         shuffle_run_id=shuffle_run_id,
     )
     return ev
+
+
+def _llm_evaluation_from_obj(
+    data: dict[str, Any],
+    *,
+    judge_model: str,
+    judge_prompt_version: str,
+    shuffle_run_id: str | None,
+) -> LLMEvaluation:
+    reasoning = _reasoning_block(data.get("reasoning"))
+    return LLMEvaluation(
+        planning_effectiveness=_score("planning_effectiveness", data.get("planning_effectiveness")),
+        tool_usage_quality=_score("tool_usage_quality", data.get("tool_usage_quality")),
+        task_completion=_score("task_completion", data.get("task_completion")),
+        reasoning=LLMEvaluationReasoning(
+            planning_comment=reasoning["planning_comment"],
+            tool_comment=reasoning["tool_comment"],
+            task_comment=reasoning["task_comment"],
+        ),
+        judge_model=judge_model,
+        judge_prompt_version=judge_prompt_version,
+        shuffle_run_id=shuffle_run_id,
+    )
+
+
+def parse_paired_judge_output_to_llm_evaluations(
+    raw_text: str,
+    *,
+    candidate_labels: list[str],
+    judge_model: str,
+    judge_prompt_version: str,
+    shuffle_run_id: str | None,
+) -> dict[str, LLMEvaluation]:
+    """
+    Parse model response for paired/multi-candidate judging.
+
+    Expected top-level shape:
+    {
+      "candidate_a": {"planning_effectiveness": ..., "reasoning": {...}},
+      "candidate_b": {...}
+    }
+    """
+    data = extract_json_object(raw_text)
+    out: dict[str, LLMEvaluation] = {}
+    for label in candidate_labels:
+        block = data.get(label)
+        if not isinstance(block, dict):
+            raise JudgeOutputParseError(f"Missing or invalid paired candidate block: {label}")
+        out[label] = _llm_evaluation_from_obj(
+            block,
+            judge_model=judge_model,
+            judge_prompt_version=judge_prompt_version,
+            shuffle_run_id=shuffle_run_id,
+        )
+    return out

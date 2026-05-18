@@ -185,6 +185,35 @@ def _llm_judge_targets(
     return out
 
 
+def _paired_llm_judge_targets(
+    inp: Path, pattern: str, out_root: Path | None
+) -> list[tuple[str, list[tuple[str, Path, Path]]]]:
+    """
+    Group directory inputs by dialog filename stem across model folders.
+
+    Returns ``[(dialog_key, [(model_name, source_path, dest_path), ...]), ...]``.
+    """
+    models = discover_model_result_directories(inp)
+    by_key: dict[str, list[tuple[str, Path, Path]]] = {}
+    for model_name, dir_path in models:
+        for fp in _iter_dialog_files(dir_path, pattern):
+            dest_name = _canonical_dest_name(fp)
+            dest = out_root / model_name / dest_name if out_root is not None else fp.with_name(dest_name)
+            by_key.setdefault(fp.stem, []).append((model_name, fp, dest))
+
+    out: list[tuple[str, list[tuple[str, Path, Path]]]] = []
+    for key in sorted(by_key):
+        out.append((key, sorted(by_key[key], key=lambda item: item[0])))
+    return out
+
+
+def _candidate_label(idx: int) -> str:
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    if idx < len(alphabet):
+        return f"candidate_{alphabet[idx]}"
+    return f"candidate_{idx + 1}"
+
+
 def _build_judge(ns: argparse.Namespace, run_cfg: JudgeRunConfig) -> BaseJudge:
     if ns.judge == "mock":
         return MockJudge(run_config=run_cfg)
@@ -215,6 +244,45 @@ def cmd_llm_judge(ns: argparse.Namespace) -> None:
     )
     judge = _build_judge(ns, run_cfg)
     registry = _build_registry(ns)
+    judge_mode = str(getattr(ns, "judge_mode", "paired"))
+
+    if judge_mode == "paired" and inp.is_dir():
+        groups = _paired_llm_judge_targets(inp, ns.pattern, out_arg)
+        if not groups:
+            raise ValueError(f"No dialog files found under {inp}")
+
+        total = len(groups)
+        failures = 0
+        for i, (dialog_key, items) in enumerate(groups, start=1):
+            prefix = f"[{i}/{total}]"
+            try:
+                loaded: list[tuple[str, str, Path, DialogRecord]] = []
+                for j, (model_name, src, dest) in enumerate(items):
+                    d = _load_one(ns, src, registry=registry, model_name=model_name)
+                    loaded.append((_candidate_label(j), model_name, dest, d))
+
+                if len(loaded) >= 2:
+                    evaluations = judge.judge_pair([(label, d) for label, _, _, d in loaded])
+                    mode_note = "paired"
+                else:
+                    evaluations = {loaded[0][0]: judge.judge(loaded[0][3])}
+                    mode_note = "single"
+
+                for label, model_name, dest, d in loaded:
+                    d2 = d.model_copy(update={"llm_evaluation": evaluations[label]})
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    export_dialog_json(d2, dest)
+
+                locs = ", ".join(f"{model_name}/{dest.name}" for _, model_name, dest, _ in loaded)
+                print(f"{prefix} ok {dialog_key} ({mode_note}) -> {locs}")
+            except (ChatCompletionError, JudgeOutputParseError, OSError, ValueError, ValidationError) as exc:
+                failures += 1
+                print(f"{prefix} error {dialog_key}: {exc}", file=sys.stderr)
+                if not getattr(ns, "continue_on_error", False):
+                    raise SystemExit(2) from exc
+        if failures:
+            raise SystemExit(1)
+        return
 
     targets = _llm_judge_targets(inp, ns.pattern, out_arg)
     if not targets:
@@ -483,7 +551,7 @@ def cmd_run_all(ns: argparse.Namespace) -> None:
 
     eff_model = (getattr(ns, "model", None) or "").strip() or DEFAULT_OPENAI_JUDGE_MODEL
     print(
-        f"[2/{total}] llm-judge (judge={ns.judge}"
+        f"[2/{total}] llm-judge (mode=paired, judge={ns.judge}"
         + (f", model={eff_model}" if ns.judge == "openai" else "")
         + f", blind={ns.blind_model_name}"
         + f") -> {judged_root}"
@@ -496,6 +564,7 @@ def cmd_run_all(ns: argparse.Namespace) -> None:
         strict=False,
         pattern=DEFAULT_DIALOG_GLOB,
         judge=ns.judge,
+        judge_mode="paired",
         model=eff_model if ns.judge == "openai" else ns.model,
         runs=int(ns.runs),
         no_shuffle=False,
@@ -605,6 +674,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_j.add_argument("--runs", type=int, default=1, help="Multi-run averaging (default 1)")
+    p_j.add_argument(
+        "--judge-mode",
+        type=str,
+        default="paired",
+        choices=["paired", "single"],
+        dest="judge_mode",
+        help="paired: score same-stem dialogs from different model folders in one prompt; single: score each file independently.",
+    )
     p_j.add_argument("--no-shuffle", action="store_true", help="Disable rubric-order shuffling when runs>1")
     p_j.add_argument("--seed", type=int, default=1337, help="RNG seed for shuffling")
     p_j.add_argument("--prompt-version", type=str, default="v1.0.0", dest="prompt_version")

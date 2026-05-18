@@ -27,8 +27,14 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 from evaluation_system.evaluators.llm_judge.config import JudgeRunConfig
-from evaluation_system.evaluators.llm_judge.parser import parse_judge_output_to_llm_evaluation
-from evaluation_system.evaluators.llm_judge.prompt import build_llm_judge_prompt
+from evaluation_system.evaluators.llm_judge.parser import (
+    parse_judge_output_to_llm_evaluation,
+    parse_paired_judge_output_to_llm_evaluations,
+)
+from evaluation_system.evaluators.llm_judge.prompt import (
+    build_llm_judge_prompt,
+    build_paired_llm_judge_prompt,
+)
 from evaluation_system.models.dialog import DialogRecord, LLMEvaluation, LLMEvaluationReasoning
 
 
@@ -47,6 +53,10 @@ class BaseJudge(ABC):
     @abstractmethod
     def judge(self, dialog: DialogRecord) -> LLMEvaluation:
         """Produce LLM judge scores for the three subjective metrics."""
+
+    def judge_pair(self, candidates: list[tuple[str, DialogRecord]]) -> dict[str, LLMEvaluation]:
+        """Produce calibrated scores for multiple candidates for the same dialog."""
+        return {label: self.judge(dialog) for label, dialog in candidates}
 
 
 def _clamp01(x: float) -> float:
@@ -139,6 +149,13 @@ class MockJudge(BaseJudge):
             judge_prompt_version=cfg.prompt_version,
             shuffle_run_id=run_id,
         )
+
+    def judge_pair(self, candidates: list[tuple[str, DialogRecord]]) -> dict[str, LLMEvaluation]:
+        cfg = self._run_config or JudgeRunConfig(runs=1, shuffle_rubric=False)
+        return {
+            label: self._single_llm_eval(dialog, prompt_version=cfg.prompt_version, shuffle_run_id=None)
+            for label, dialog in candidates
+        }
 
 
 # Reasoning-style models that ignore (or reject) ``temperature``.
@@ -306,3 +323,61 @@ class OpenAIJudge(BaseJudge):
             judge_prompt_version=cfg.prompt_version,
             shuffle_run_id=run_id,
         )
+
+    def judge_pair(self, candidates: list[tuple[str, DialogRecord]]) -> dict[str, LLMEvaluation]:
+        if len(candidates) < 2:
+            return super().judge_pair(candidates)
+
+        cfg = self._run_config or JudgeRunConfig(runs=1, shuffle_rubric=False)
+        rng = random.Random(cfg.seed)
+        run_id = str(uuid.uuid4()) if cfg.shuffle_rubric and cfg.runs > 1 else None
+        labels = [label for label, _ in candidates]
+        acc: dict[str, list[LLMEvaluation]] = {label: [] for label in labels}
+
+        for _ in range(max(1, int(cfg.runs))):
+            order = list(_RUBRIC_DIMS)
+            if cfg.shuffle_rubric:
+                rng.shuffle(order)
+            prompt = build_paired_llm_judge_prompt(
+                candidates,
+                prompt_version=cfg.prompt_version,
+                rubric_order=order,
+                blind_model_name=cfg.blind_model_name,
+            )
+            raw = self._complete(prompt)
+            parsed = parse_paired_judge_output_to_llm_evaluations(
+                raw,
+                candidate_labels=labels,
+                judge_model=self._model,
+                judge_prompt_version=cfg.prompt_version,
+                shuffle_run_id=None,
+            )
+            for label, ev in parsed.items():
+                acc[label].append(ev)
+
+        out: dict[str, LLMEvaluation] = {}
+        for label, values in acc.items():
+            if len(values) == 1:
+                single = values[0]
+                out[label] = LLMEvaluation(
+                    planning_effectiveness=single.planning_effectiveness,
+                    tool_usage_quality=single.tool_usage_quality,
+                    task_completion=single.task_completion,
+                    reasoning=single.reasoning,
+                    judge_model=self._model,
+                    judge_prompt_version=cfg.prompt_version,
+                    shuffle_run_id=run_id,
+                )
+                continue
+
+            pe, tu, tc = _average(values)
+            out[label] = LLMEvaluation(
+                planning_effectiveness=pe,
+                tool_usage_quality=tu,
+                task_completion=tc,
+                reasoning=values[-1].reasoning,
+                judge_model=self._model,
+                judge_prompt_version=cfg.prompt_version,
+                shuffle_run_id=run_id,
+            )
+        return out
